@@ -6,17 +6,13 @@ import com.intellij.ide.bookmark.BookmarksManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.project.Project;
-import kotlin.Pair;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 public final class BookmarkKeeperManager {
-  private List<Container> bookmarks;
+  private List<Container> bookmarkContainers;
   private List<String> groupNames;
 
   public static BookmarkKeeperManager getInstance() {
@@ -28,50 +24,45 @@ public final class BookmarkKeeperManager {
       final BookmarksManager bookmarksManager = BookmarksManager.getInstance(project);
       if (bookmarksManager == null) return;
 
-      // Save group names and their indexes
-      List<Pair<String, Integer>> groupNamesWithIndexes = bookmarksManager.getGroups()
-          .stream()
-          .map(group -> new Pair<>(group.getName(), bookmarksManager.getGroups().indexOf(group)))
+      // Save all group names in order
+      groupNames = bookmarksManager.getGroups().stream()
+          .map(BookmarkGroup::getName)
           .collect(Collectors.toList());
 
-      groupNames = groupNamesWithIndexes.stream()
-          .map(Pair::getFirst)
-          .collect(Collectors.toList());
-      bookmarks = bookmarksManager.getBookmarks()
+      // Save bookmarks with all their group names
+      bookmarkContainers = bookmarksManager.getBookmarks()
           .stream()
           .map(bookmark -> {
-            BookmarkGroup group = bookmarksManager.getGroups(bookmark)
+            // Get all group names for this bookmark
+            List<String> bookmarkGroupNames = bookmarksManager.getGroups(bookmark)
                 .stream()
-                .findFirst()
-                .orElse(null);
+                .map(BookmarkGroup::getName)
+                .collect(Collectors.toList());
+
             return new Container(
                 bookmarksManager.getType(bookmark),
                 bookmark,
-                group != null ? group.getName() : null
+                bookmarkGroupNames
             );
           })
           .collect(Collectors.toList());
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      // Log the exception if needed
+      System.err.println("Error saving bookmarks: " + e.getMessage());
     }
   }
 
   public void loadBookmarks(Project project) {
     try {
       final BookmarksManager bookmarksManager = BookmarksManager.getInstance(project);
-      if (bookmarksManager == null || bookmarks == null) {
+      if (bookmarksManager == null || bookmarkContainers == null) {
         return;
       }
+
+      // Remove existing bookmarks
       bookmarksManager.remove();
 
-      // Create a temporary default group
-      final BookmarkGroup tempDefaultGroup = bookmarksManager.addGroup("__temp_default__", true);
-
-      // Add all bookmarks to temp default group
-      for (Container container : bookmarks) {
-        bookmarksManager.add(container.bookmark, container.type);
-      }
-
-      // Recreate original groups
+      // Recreate original groups in the saved order
       Map<String, BookmarkGroup> groupMap = new HashMap<>();
       BookmarkGroup originalDefaultGroup = null;
       for (String groupName : groupNames) {
@@ -89,28 +80,44 @@ public final class BookmarkKeeperManager {
       // Get saved bookmarks
       final List<Bookmark> savedBookmarks = bookmarksManager.getBookmarks();
 
-      for (Container container : bookmarks) {
+      for (Container container : bookmarkContainers) {
         Optional<Bookmark> matchingBookmark = savedBookmarks.stream()
             .filter(b -> b.getAttributes().equals(container.bookmark.getAttributes()))
             .findFirst();
 
         if (matchingBookmark.isPresent()) {
           Bookmark bookmark = matchingBookmark.get();
-          if (container.groupName != null && !container.groupName.isEmpty()) {
-            BookmarkGroup targetGroup = groupMap.get(container.groupName);
-            if (targetGroup != null) {
-              targetGroup.add(bookmark, container.type, null);
+
+          // Add to all groups this bookmark was originally in, respecting the saved order
+          for (String groupName : groupNames) {
+            if (container.groupNames.contains(groupName)) {
+              BookmarkGroup targetGroup = groupMap.get(groupName);
+              if (targetGroup != null) {
+                targetGroup.add(bookmark, container.type, null);
+              }
             }
           }
         }
       }
+
       // Set the original default group
       if (originalDefaultGroup != null) {
         originalDefaultGroup.setDefault(true);
       }
-      // Remove the temporary default group
-      tempDefaultGroup.remove();
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      // Log the exception if needed
+      System.err.println("Error loading bookmarks: " + e.getMessage());
     }
+  }
+
+  // Optional method to check if bookmarks are available
+  public boolean hasBookmarksSaved() {
+    return bookmarkContainers != null && !bookmarkContainers.isEmpty();
+  }
+
+  // Optional method to clear saved bookmarks
+  public void clearSavedBookmarks() {
+    bookmarkContainers = null;
+    groupNames = null;
   }
 }
