@@ -28,15 +28,12 @@ public final class BookmarkKeeperManager {
       final BookmarksManager bookmarksManager = BookmarksManager.getInstance(project);
       if (bookmarksManager == null) return;
 
-      // Save group names and their indexes
-      List<Pair<String, Integer>> groupNamesWithIndexes = bookmarksManager.getGroups()
+      // Save group names
+      groupNames = bookmarksManager.getGroups()
           .stream()
-          .map(group -> new Pair<>(group.getName(), bookmarksManager.getGroups().indexOf(group)))
+          .map(BookmarkGroup::getName)
           .collect(Collectors.toList());
 
-      groupNames = groupNamesWithIndexes.stream()
-          .map(Pair::getFirst)
-          .collect(Collectors.toList());
       bookmarks = bookmarksManager.getBookmarks()
           .stream()
           .map(bookmark -> {
